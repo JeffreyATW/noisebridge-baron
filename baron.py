@@ -201,10 +201,17 @@ if __name__ == "__main__":
     parser.add_argument("--debug",      action="store_true",    help="Enable debugging output")
     parser.add_argument("--test",       action="store_true",    help="Execute single-shot keypad output test")
     parser.add_argument("--promiscuous",action="store_true",    help="Enable any keypress at all to open the door")
+    parser.add_argument("--daemon",     action="store_true",    help="Daemonize the baron process")
+    parser.add_argument("--instance",   default=None,           help="Name this baron instance, if there are more than one instance")
+    parser.add_argument("--pidfile",    default=None,           help="Name the pidfile that should store the daemon pid")
     args = parser.parse_args()
 
     codes_path = args.codefile
     promiscuous = args.promiscuous
+    if args.instance is None:
+      args.instance = "default"
+    if args.pidfile is None:
+      args.pidfile = "/var/run/baron_%s.pid" % args.instance
 
     level = logging.DEBUG if args.debug else logging.INFO
     logging.basicConfig(format='%(asctime)s %(levelname)-7s %(message)s', datefmt='%Y-%m-%d %H:%M:%S', level=level, filename=args.logfile)
@@ -223,6 +230,37 @@ if __name__ == "__main__":
     # with no input.  If the keypad is idle for this long, we'll detect it by
     # reading zero bytes, and clear the input buffer.
     keypad.timeout = 10
+
+    if args.daemon:
+      try: 
+        pid = os.fork() 
+        if pid > 0:
+          # exit first parent
+          sys.exit(0) 
+      except OSError, e: 
+        print >>sys.stderr, "fork #1 failed: %d (%s)" % (e.errno, e.strerror) 
+        sys.exit(1)
+
+      # decouple from parent environment
+      os.chdir("/") 
+      os.setsid() 
+      os.umask(0) 
+
+      # do second fork
+      try: 
+          pid = os.fork() 
+          if pid > 0:
+              # exit from second parent, print eventual PID before
+              print "Daemon PID %d" % pid 
+              f = open(args.pidfile, "w")
+              f.seek(0)
+              f.write(str(pid) + "\n")
+              f.close()
+              sys.exit(0) 
+      except OSError, e: 
+          print >>sys.stderr, "fork #2 failed: %d (%s)" % (e.errno, e.strerror) 
+          sys.exit(1) 
+      # start the daemon main loop
 
     logging.info("Starting Baron")
     load_codes()
